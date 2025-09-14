@@ -148,24 +148,7 @@ with col2:
     if_th = st.slider("IsolationForest threshold (more negative = stricter)", -0.8, 0.0, -0.2, 0.05)
     q_thr = st.slider("Day/Night quantile threshold", 0.80, 0.99, 0.95, 0.01)
 
-if uploaded is not None:
-    df = pd.read_csv(uploaded)
-
-    # minimal checks (case-insensitive rename)
-    required = {"timestamp","sensor_id","room","appliance","watts","voltage","current","pf"}
-    rename_map = {}
-    for c in df.columns:
-        lc = c.lower()
-        if lc in required:
-            rename_map[c] = lc
-    df = df.rename(columns=rename_map)
-    if required - set(df.columns):
-        missing_cols = sorted(list(required - set(df.columns)))
-        st.error(f"CSV missing columns: {missing_cols}")
-        st.stop()
-
-    st.success(f"Loaded {len(df):,} rows · {df['sensor_id'].nunique()} sensors · {df['room'].nunique()} rooms")
-
+def render_outputs(df):
     # Features
     feat_df = add_features(df)
 
@@ -176,6 +159,7 @@ if uploaded is not None:
     # Detect
     with st.spinner("Detecting anomalies..."):
         events = detect_events(feat_df, thr_df, models, z_threshold=z_th, if_threshold=if_th)
+
     st.write(f"**Detected events:** {len(events)}")
     st.dataframe(events.head(50))
 
@@ -188,20 +172,17 @@ if uploaded is not None:
     if not df_day.empty:
         dt_hours = 5/60.0  # assume 5-min samples
         energy_room = (df_day.groupby("room")["watts"].sum() * dt_hours) / 1000.0
-
         if MATPLOTLIB_OK:
             fig1 = plt.figure(figsize=(7,3))
             energy_room.sort_values(ascending=False).plot(kind="bar")
             plt.ylabel("kWh"); plt.tight_layout()
             st.pyplot(fig1)
         else:
-            st.info("Matplotlib not available, using built-in bar chart.")
             st.bar_chart(energy_room.sort_values(ascending=False))
 
     st.subheader("Load by Hour (first day)")
     if not df_day.empty:
         load_hour = df_day.groupby(df_day["timestamp"].dt.hour)["watts"].sum()
-
         if MATPLOTLIB_OK:
             fig2 = plt.figure(figsize=(7,3))
             load_hour.plot(kind="line", marker="o")
@@ -213,7 +194,6 @@ if uploaded is not None:
     st.subheader("Alerts by Room (detected)")
     if not events.empty:
         alerts_by_room = events.groupby("room")["sensor_id"].count().sort_values(ascending=False)
-
         if MATPLOTLIB_OK:
             fig3 = plt.figure(figsize=(7,3))
             alerts_by_room.plot(kind="bar")
@@ -230,9 +210,28 @@ if uploaded is not None:
         mime="text/csv",
     )
 
+# ------------------ Main logic ------------------
+if uploaded is not None:
+    # minimal checks (case-insensitive rename)
+    df = pd.read_csv(uploaded)
+    required = {"timestamp","sensor_id","room","appliance","watts","voltage","current","pf"}
+    rename_map = {}
+    for c in df.columns:
+        lc = c.lower()
+        if lc in required:
+            rename_map[c] = lc
+    df = df.rename(columns=rename_map)
+    if required - set(df.columns):
+        missing_cols = sorted(list(required - set(df.columns)))
+        st.error(f"CSV missing columns: {missing_cols}")
+        st.stop()
+
+    st.success(f"Loaded {len(df):,} rows · {df['sensor_id'].nunique()} sensors · {df['room'].nunique()} rooms")
+    render_outputs(df)
+
 else:
-    st.info("No file uploaded yet. You can test with the sample data below.")
-    # small sample (generated inline)
+    # ---- AUTO-LOAD DEMO MODE ----
+    st.info("No file uploaded — demo data is shown automatically. Upload your own CSV to replace it.")
     ts = pd.date_range("2025-01-01", periods=288, freq="5min")
     demo = pd.DataFrame({
         "timestamp": ts,
@@ -244,10 +243,4 @@ else:
         "current": 0.4,
         "pf": 0.8,
     })
-    st.download_button(
-        "⬇️ Download sample CSV",
-        data=demo.to_csv(index=False).encode("utf-8"),
-        file_name="sample_revolt_data.csv",
-        mime="text/csv",
-    )
-    st.write("Upload this sample to see the charts and detection flow.")
+    render_outputs(demo)
