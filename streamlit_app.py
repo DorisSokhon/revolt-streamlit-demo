@@ -1,9 +1,15 @@
-
 import io
 import time
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+
+# ---- safe matplotlib import (optional) ----
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_OK = True
+except Exception:
+    MATPLOTLIB_OK = False
+
 from datetime import datetime
 from sklearn.ensemble import IsolationForest
 import streamlit as st
@@ -95,7 +101,7 @@ def detect_events(feat_df, thr_df, models, z_threshold=3.0, if_threshold=-0.2):
         thr_map.setdefault(r.sensor_id, {})[r.period] = r.thr
 
     events = []
-    for i, row in feat_df.iterrows():
+    for _, row in feat_df.iterrows():
         ts = pd.to_datetime(row["timestamp"])
         sid = row["sensor_id"]
         watts = float(row["watts"])
@@ -144,10 +150,9 @@ with col2:
 
 if uploaded is not None:
     df = pd.read_csv(uploaded)
-    # minimal checks
+
+    # minimal checks (case-insensitive rename)
     required = {"timestamp","sensor_id","room","appliance","watts","voltage","current","pf"}
-    missing = required - set([c.lower() for c in df.columns])
-    # try case-insensitive rename
     rename_map = {}
     for c in df.columns:
         lc = c.lower()
@@ -155,7 +160,8 @@ if uploaded is not None:
             rename_map[c] = lc
     df = df.rename(columns=rename_map)
     if required - set(df.columns):
-        st.error(f"CSV missing columns: {sorted(list(required - set(df.columns)))}")
+        missing_cols = sorted(list(required - set(df.columns)))
+        st.error(f"CSV missing columns: {missing_cols}")
         st.stop()
 
     st.success(f"Loaded {len(df):,} rows · {df['sensor_id'].nunique()} sensors · {df['room'].nunique()} rooms")
@@ -182,26 +188,39 @@ if uploaded is not None:
     if not df_day.empty:
         dt_hours = 5/60.0  # assume 5-min samples
         energy_room = (df_day.groupby("room")["watts"].sum() * dt_hours) / 1000.0
-        fig1 = plt.figure(figsize=(7,3))
-        energy_room.sort_values(ascending=False).plot(kind="bar")
-        plt.ylabel("kWh"); plt.tight_layout()
-        st.pyplot(fig1)
+
+        if MATPLOTLIB_OK:
+            fig1 = plt.figure(figsize=(7,3))
+            energy_room.sort_values(ascending=False).plot(kind="bar")
+            plt.ylabel("kWh"); plt.tight_layout()
+            st.pyplot(fig1)
+        else:
+            st.info("Matplotlib not available, using built-in bar chart.")
+            st.bar_chart(energy_room.sort_values(ascending=False))
 
     st.subheader("Load by Hour (first day)")
     if not df_day.empty:
         load_hour = df_day.groupby(df_day["timestamp"].dt.hour)["watts"].sum()
-        fig2 = plt.figure(figsize=(7,3))
-        load_hour.plot(kind="line", marker="o")
-        plt.xlabel("Hour"); plt.ylabel("Watts (approx)"); plt.tight_layout()
-        st.pyplot(fig2)
+
+        if MATPLOTLIB_OK:
+            fig2 = plt.figure(figsize=(7,3))
+            load_hour.plot(kind="line", marker="o")
+            plt.xlabel("Hour"); plt.ylabel("Watts (approx)"); plt.tight_layout()
+            st.pyplot(fig2)
+        else:
+            st.line_chart(load_hour)
 
     st.subheader("Alerts by Room (detected)")
     if not events.empty:
         alerts_by_room = events.groupby("room")["sensor_id"].count().sort_values(ascending=False)
-        fig3 = plt.figure(figsize=(7,3))
-        alerts_by_room.plot(kind="bar")
-        plt.ylabel("Count"); plt.tight_layout()
-        st.pyplot(fig3)
+
+        if MATPLOTLIB_OK:
+            fig3 = plt.figure(figsize=(7,3))
+            alerts_by_room.plot(kind="bar")
+            plt.ylabel("Count"); plt.tight_layout()
+            st.pyplot(fig3)
+        else:
+            st.bar_chart(alerts_by_room)
 
     # Download events
     st.download_button(
